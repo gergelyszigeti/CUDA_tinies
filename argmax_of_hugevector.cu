@@ -22,16 +22,16 @@ unsigned int largestOfWarp(const T* values)
 
 #pragma unroll
     for (int i = 32 / 2; i > 0; i /= 2) {
-        T  this_lane_values = values_shared[lanes[tid]];
-        T other_lane_values = __shfl_down_sync(0xffffffff, this_lane_values, i);
+        T  this_lane_value = values_shared[lanes[tid]];
+        T other_lane_value = __shfl_down_sync(0xffffffff, this_lane_value, i);
 #if 0
-        if (other_lane_values > this_lane_values)
+        if (other_lane_values > this_lane_value)
             lanes[tid] = lanes[tid + i];
         __syncthreads();
 #else
         // a bit faster this way, despite of bigger code and multiplication
         // and sometime unnecessary shared mem op
-        lanes[tid] = lanes[tid + (other_lane_values > this_lane_values) * i];
+        lanes[tid] = lanes[tid + (other_lane_value > this_lane_value) * i];
 #endif
     }
     // return the thread id of the biggest numClosePoints of this warp (lane 0 surely has it)
@@ -69,7 +69,7 @@ T largestOfBlock(const T* values, int value_count)
     if (tid < 32)
     {
         // find the biggests of biggest numbers provided by each warp
-        int largest_warp = largestOfWarp(largest_values); 
+        int largest_warp = largestOfWarp(largest_values);
         // winner thread (0-1023) is: biggest lane (0-31) in the biggest warp (0-31)
 	// if thread number is less than 1024, lane and warp numbers shrinks accordingly
         winner_thread = largest_threads[largest_warp];
@@ -91,13 +91,13 @@ int main()
     auto n = N;
 
     MyRand myrand;
-  
+
     float *h_random_array, *d_random_array = nullptr;
     // try to allocate GPU memory first, GPU memory is usually smaller
     checkCudaErrors(
       cudaMalloc(&d_random_array, N * sizeof(float))
     );
-    
+
     int *d_block_map = nullptr;
     checkCudaErrors(
       cudaMalloc(&d_block_map, N/1024 * sizeof(*d_block_map))
@@ -112,18 +112,18 @@ int main()
     checkCudaErrors(
       cudaMallocHost(&h_random_array, N * sizeof(float))
     );
-    
+
     for (auto i = 0; i < N; ++i) {
-        // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed) 
+        // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed)
         h_random_array[i] = static_cast<float>(myrand()) / static_cast<unsigned int>(-1);
 	h_random_array[i] *= 1'000'000;
 	//std::cout << h_random_array[i] << "\n";
     }
 
-    // TODO: cut host array into pieces, do async memcopy chunks on other stream 
+    // TODO: cut host array into pieces, do async memcopy chunks on other stream
     checkCudaErrors(
       cudaMemcpy(d_random_array, h_random_array, N * sizeof(float), cudaMemcpyHostToDevice)
-    ); 
+    );
 
 #if 1
     constexpr int experiment_count = 100;
@@ -131,14 +131,14 @@ int main()
     // now this test code is only thing that works here
     int *d_largest_thread = nullptr;
     float *d_largest = nullptr;
-        
+
     checkCudaErrors(
       cudaMalloc(&d_largest_thread, sizeof(*d_largest_thread))
     );
     checkCudaErrors(
       cudaMalloc(&d_largest, sizeof(*d_largest))
     );
-    
+
     // it runs for testN values only, instead of N
     int testN = 256+128;
 
@@ -147,9 +147,9 @@ int main()
         int offset = myrand() % (N - testN - 1);
 
         threadBlockTest<<<1, testN>>>(d_random_array + offset, testN,
-            	                  d_largest_thread);
+                                      d_largest_thread);
         int h_largest_thread = -1;
-        
+
         checkCudaErrors(
           cudaMemcpy(&h_largest_thread, d_largest_thread, sizeof(h_largest_thread),
                      cudaMemcpyDeviceToHost)
@@ -164,16 +164,16 @@ int main()
         for (int i = offset; i < offset + testN; ++i) {
             if (h_random_array[i] > largest) {
                 largest = h_random_array[i];
-                largest_index = i;	    
+                largest_index = i;
             }
         }
-        
+
         std::cout << "CPU found largest value on index " << largest_index
                   << ", its value is " << largest << "\n";
         std::cout << (largest_index == h_largest_thread? "CHECKED.\n" : "ERROR!\n");
         std::cout << (largest_index == h_largest_thread?
 	            "---------------------------------------------------------------\n"
-	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");	  
+	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     }
 #endif
 
@@ -191,7 +191,7 @@ int main()
     checkCudaErrors(cudaFree(d_block_winner));
 
 
-    
+
 
 
 
