@@ -128,7 +128,7 @@ int main()
 #if 1
     constexpr int experiment_count = 100;
 
-    // now this test code is only thing that works here
+    // now this test code is the only thing that is really used
     int *d_largest_thread = nullptr;
     float *d_largest = nullptr;
 
