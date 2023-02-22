@@ -95,7 +95,7 @@ int main()
     float *h_random_array, *d_random_array = nullptr;
     // try to allocate GPU memory first, GPU memory is usually smaller
     checkCudaErrors(
-      cudaMalloc(&d_random_array, N * sizeof(float))
+      cudaMalloc(&d_random_array, N * sizeof(*d_random_array))
     );
 
     int *d_block_map = nullptr;
@@ -110,7 +110,7 @@ int main()
 
     // page locked CPU memory for later chunck by chunk async memcopy (TODO)
     checkCudaErrors(
-      cudaMallocHost(&h_random_array, N * sizeof(float))
+      cudaMallocHost(&h_random_array, N * sizeof(*h_random_array))
     );
 
     for (auto i = 0; i < N; ++i) {
@@ -122,7 +122,8 @@ int main()
 
     // TODO: cut host array into pieces, do async memcopy chunks on other stream
     checkCudaErrors(
-      cudaMemcpy(d_random_array, h_random_array, N * sizeof(float), cudaMemcpyHostToDevice)
+      cudaMemcpy(d_random_array, h_random_array, N * sizeof(*h_random_array),
+	         cudaMemcpyHostToDevice)
     );
 
 #if 1
