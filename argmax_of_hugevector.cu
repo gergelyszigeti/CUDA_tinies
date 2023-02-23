@@ -3,7 +3,7 @@
 #include <inttypes.h>
 //#include <cuda_device_runtime_api.h>
 
-#include "helper_cuda.h"  //TODO: only checkCudaErrors() is used
+#include "check_cuda_errors.h"
 #include "myrand.h"
 
 // returns a valid result for lane 0 only!
