@@ -34,7 +34,7 @@ unsigned int largestOfWarp(const T* values)
         lanes[tid] = lanes[tid + (other_lane_value > this_lane_value) * i];
 #endif
     }
-    // return the thread id of the biggest numClosePoints of this warp (lane 0 surely has it)
+    // return the thread id of the biggest value of this warp (lane 0 surely has it)
     return lanes[warp * 32]; /*** valid only if called from lane 0 of a warp ***/
 }
 
@@ -50,7 +50,7 @@ T largestOfBlock(const T* values, int value_count)
 
     int tid = threadIdx.x;
 
-    // if pointcount is less than 1024, some places left untouched in shared memory,
+    // if value_count is less than 1024, some places left untouched in shared memory,
     // as a precaution, we init the whole thing with 0s (0s are not big)
     // TODO: is it necessary, or can I assume that 'static' ensures 0s?
     if (value_count < 1024 && tid < 32) { largest_values[tid] = 0; }
