@@ -143,11 +143,11 @@ int main()
       cudaMalloc(&d_random_array, N * sizeof(*d_random_array))
     );
 
-    int *d_block_max = nullptr;
+    float *d_block_max = nullptr;
     checkCudaErrors(
       cudaMalloc(&d_block_max, N/1024 * sizeof(*d_block_max))
     );
-    float *d_block_map = nullptr;
+    int *d_block_map = nullptr;
     checkCudaErrors(
       cudaMalloc(&d_block_map, N/1024 * 2 * sizeof(*d_block_map))
     );
