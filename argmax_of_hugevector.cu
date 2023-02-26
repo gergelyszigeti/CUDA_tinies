@@ -104,10 +104,14 @@ void blocksArgmaxFirst(/*input*/  const T* __restrict__ values,
     }
 }
 
-void blocksArgmax(/*input*/   const T* __restrict__ prev_block_max, // both size of N
+template<typename T>
+__global__
+void blocksArgmax(/*input*/   const T* __restrict__ prev_block_max,
                             const int* __restrict__ prev_block_map,
-                  /*output*/      int* __restrict__ block_map,      // both size of
-                                    T* __restrict__ block_max)      // N/(thread count)
+			    // both inputs are the size of N
+                  /*output*/      int* __restrict__ block_map,
+                                    T* __restrict__ block_max)
+                            // both outputs are the size of N/(value_count)
 {
     int value_count = blockDim.x; // value count = thread count in this block
     int     i_block = blockIdx.x; // block id
