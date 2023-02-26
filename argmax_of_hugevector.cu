@@ -85,6 +85,47 @@ void threadBlockTest(/*input*/  const T* __restrict__ values, int value_count,
     *thread_id = largestOfBlock(values, value_count);
 }
 
+// we need a separate first kernel to initialize block_map
+// (otherwise, we would need a huge array with 0,1,2,...,N values)
+template<typename T>
+__global__
+void blocksArgmaxFirst(/*input*/  const T* __restrict__ values,
+                       /*output*/     int* __restrict__ block_map,
+                                        T* __restrict__ block_max)
+{
+    int value_count = blockDim.x;
+    auto largest_thread = largestOfBlock(values, value_count);
+    // store one winner thread id and max value per thread block
+    if (threadIdx.x == 0) {
+        int iout = blockIdx.x;
+        largest_thread += iout * value_count;
+        block_map[iout] = largest_thread;
+        block_max[iout] = values[largest_thread];
+    }
+}
+
+void blocksArgmax(/*input*/   const T* __restrict__ prev_block_max, // both size of N
+                            const int* __restrict__ prev_block_map,
+                  /*output*/      int* __restrict__ block_map,      // both size of
+                                    T* __restrict__ block_max)      // N/(thread count)
+{
+    int value_count = blockDim.x; // value count = thread count in this block
+    int     i_block = blockIdx.x; // block id
+    size_t thread_index_offset = value_count * i_block;
+
+    prev_block_max += thread_index_offset; // select from prev maxes for this block
+    auto largest_thread = largestOfBlock(prev_block_max, value_count);
+    // store one winner thread index and max value per thread block
+    // note: winner thread index needs mapping as processed arrays shrink during
+    // the iteration (we still need the indices from the original huge array)
+    if (threadIdx.x == 0) {
+        largest_thread    += thread_index_offset;
+        largest_thread     = prev_block_map[largest_thread]; // mapping here
+        block_max[i_block] = prev_block_max[largest_thread];
+        block_map[i_block] = largest_thread;
+    }
+}
+
 int main()
 {
     constexpr size_t N = (256 + 128) * 1024 * 1024;
@@ -98,15 +139,15 @@ int main()
       cudaMalloc(&d_random_array, N * sizeof(*d_random_array))
     );
 
-    int *d_block_map = nullptr;
+    int *d_block_max = nullptr;
     checkCudaErrors(
-      cudaMalloc(&d_block_map, N/1024 * sizeof(*d_block_map))
+      cudaMalloc(&d_block_max, N/1024 * sizeof(*d_block_max))
     );
-    float *d_block_winner = nullptr;
+    float *d_block_map = nullptr;
     checkCudaErrors(
-      cudaMalloc(&d_block_winner, N/1024 * sizeof(*d_block_winner))
+      cudaMalloc(&d_block_map, N/1024 * 2 * sizeof(*d_block_map))
     );
-
+    size_t block_map_selector = 0;
 
     // page locked CPU memory for later chunck by chunk async memcopy (TODO)
     checkCudaErrors(
@@ -177,10 +218,20 @@ int main()
 	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     }
 #endif
-
+    // TODO: I do think a while(n /= 1024) loop would fit much better here
     for (; n >= 1024; n /= 1024) {
         // CUDA kernel with map
+        // something like this:
+        /* blocksArgmax<<< (n + 1024 - 1) / 1024 , min(1024, n) >>>
+                       (d_block_max + block_map_selector,
+                        d_block_map + block_map_selector,
+                        d_block_max + N/1024 - block_map_selector,
+                        d_block_map + N/1024 - block_map_selector,
+                       )
+           block_map_selector = N/1024 - block_map_selector;
+         */
     }
+    // TODO: not needed with while loop (however, we have a separate first)
     // last CUDA kernel with map
 
 #if 1
@@ -188,8 +239,8 @@ int main()
     checkCudaErrors(cudaFree(d_largest_thread));
 #endif
 
+    checkCudaErrors(cudaFree(d_block_max));
     checkCudaErrors(cudaFree(d_block_map));
-    checkCudaErrors(cudaFree(d_block_winner));
 
 
 
