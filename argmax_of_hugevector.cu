@@ -6,13 +6,16 @@
 #include "check_cuda_errors.h"
 #include "myrand.h"
 
+// fixed BLOCK_SIZE to try out various values during optimization
+constexpr int BLOCK_SIZE = 1024;
+
 // returns a valid result for lane 0 only!
 template<typename T>
 __device__
 unsigned int largestOfWarp(const T* values)
 {
-    __shared__ int lanes[1024];
-    __shared__   T values_shared[1024];
+    __shared__ int lanes[BLOCK_SIZE];
+    __shared__   T values_shared[BLOCK_SIZE];
 
     int  tid = threadIdx.x;
     //int lane = threadIdx.x % 32;
@@ -135,6 +138,7 @@ int main()
     constexpr size_t N = (256 + 128) * 1024 * 1024;
     auto n = N;
 
+
     MyRand myrand;
 
     float *h_random_array, *d_random_array = nullptr;
@@ -145,11 +149,11 @@ int main()
 
     float *d_block_max = nullptr;
     checkCudaErrors(
-      cudaMalloc(&d_block_max, N/1024 * sizeof(*d_block_max))
+      cudaMalloc(&d_block_max, N/BLOCK_SIZE * 2 * sizeof(*d_block_max))
     );
     int *d_block_map = nullptr;
     checkCudaErrors(
-      cudaMalloc(&d_block_map, N/1024 * 2 * sizeof(*d_block_map))
+      cudaMalloc(&d_block_map, N/BLOCK_SIZE * 2 * sizeof(*d_block_map))
     );
     size_t block_map_selector = 0;
 
@@ -222,17 +226,18 @@ int main()
 	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     }
 #endif
-    // TODO: I do think a while(n /= 1024) loop would fit much better here
-    for (; n >= 1024; n /= 1024) {
+    // TODO: I do think a while(n /= BLOCK_SIZE) loop would fit much better here
+    for (; n >= BLOCK_SIZE; n /= BLOCK_SIZE) {
         // CUDA kernel with map
         // something like this:
-        /* blocksArgmax<<< (n + 1024 - 1) / 1024 , min(1024, n) >>>
+        /* blocksArgmax<<< (n + BLOCK_SIZE - 1) / BLOCK_SIZE,
+	                    min(BLOCK_SIZE, n) >>>
                        (d_block_max + block_map_selector,
                         d_block_map + block_map_selector,
-                        d_block_max + N/1024 - block_map_selector,
-                        d_block_map + N/1024 - block_map_selector,
+                        d_block_max + N/BLOCK_SIZE - block_map_selector,
+                        d_block_map + N/BLOCK_SIZE - block_map_selector,
                        )
-           block_map_selector = N/1024 - block_map_selector;
+           block_map_selector = N/BLOCK_SIZE - block_map_selector;
          */
     }
     // TODO: not needed with while loop (however, we have a separate first)
