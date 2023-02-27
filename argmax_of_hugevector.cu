@@ -174,8 +174,8 @@ int main()
     std::cout << "Generating " << N << " long random array in CPU memory\n";
     for (auto i = 0; i < N; ++i) {
         // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed)
-        h_random_array[i]  = static_cast<float>(myrand());
-        h_random_array[i] /= static_cast<float>(static_cast<unsigned int>(-1));
+        h_random_array[i]  = myrand();
+        h_random_array[i] /= static_cast<unsigned int>(-1);
 	h_random_array[i] *= 1'000'000;
 	//std::cout << h_random_array[i] << "\n";
     }
