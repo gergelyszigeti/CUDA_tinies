@@ -46,7 +46,7 @@ unsigned int largestOfWarp(const T* values)
 // !!! value_count must be positive and divisible by 32 !!!
 template<typename T>
 __device__
-T largestOfBlock(const T* values, int value_count)
+unsigned int largestOfBlock(const T* values, int value_count)
 {
     static __shared__ int largest_threads[32];
     static __shared__   T largest_values[32];
@@ -83,7 +83,7 @@ T largestOfBlock(const T* values, int value_count)
 template<typename T>
 __global__
 void threadBlockTest(/*input*/  const T* __restrict__ values, int value_count,
-		     /*output*/ int* __restrict__ thread_id)
+		     /*output*/ unsigned int* __restrict__ thread_id)
 {
     *thread_id = largestOfBlock(values, value_count);
 }
@@ -92,50 +92,59 @@ void threadBlockTest(/*input*/  const T* __restrict__ values, int value_count,
 // (otherwise, we would need a huge array with 0,1,2,...,N values)
 template<typename T>
 __global__
-void blocksArgmaxFirst(/*input*/  const T* __restrict__ values,
-                       /*output*/     int* __restrict__ block_map,
-                                        T* __restrict__ block_max)
+void blocksArgmaxFirst(/*input*/       const T* __restrict__ values,
+                       /*output*/ unsigned int* __restrict__ block_map,
+                                             T* __restrict__ block_max)
 {
     int value_count = blockDim.x;
+    int i_out = blockIdx.x;
+    int thread_index_offset = i_out * value_count;
+    values += thread_index_offset;
     auto largest_thread = largestOfBlock(values, value_count);
     // store one winner thread id and max value per thread block
     if (threadIdx.x == 0) {
-        int iout = blockIdx.x;
-        largest_thread += iout * value_count;
-        block_map[iout] = largest_thread;
-        block_max[iout] = values[largest_thread];
+        block_max[i_out] = values[largest_thread];
+        // in the first step, mapping to the original array is easy
+	block_map[i_out] = largest_thread + thread_index_offset;
     }
 }
 
-template<typename T>
+template <typename T>
 __global__
-void blocksArgmax(/*input*/   const T* __restrict__ prev_block_max,
-                            const int* __restrict__ prev_block_map,
-			    // both inputs are the size of N
-                  /*output*/      int* __restrict__ block_map,
-                                    T* __restrict__ block_max)
-                            // both outputs are the size of N/(value_count)
+void blocksArgmax(/* inputs, both are the size of N */
+                   const unsigned int* __restrict__ prev_block_map,
+                              const T* __restrict__ prev_block_max,
+                  /* output, both are the size of N/value_count */
+                         unsigned int* __restrict__ block_map,
+                                    T* __restrict__ block_max
+                 )
 {
     int value_count = blockDim.x; // value count = thread count in this block
-    int     i_block = blockIdx.x; // block id
-    size_t thread_index_offset = value_count * i_block;
+    int       i_out = blockIdx.x; // output index (block id)
+    unsigned int thread_index_offset = i_out * value_count;
 
-    prev_block_max += thread_index_offset; // select from prev maxes for this block
+    // select from prev maxes for this thread block
+    prev_block_max += thread_index_offset;
+
     auto largest_thread = largestOfBlock(prev_block_max, value_count);
     // store one winner thread index and max value per thread block
     // note: winner thread index needs mapping as processed arrays shrink during
     // the iteration (we still need the indices from the original huge array)
     if (threadIdx.x == 0) {
-        largest_thread    += thread_index_offset;
-        largest_thread     = prev_block_map[largest_thread]; // mapping here
-        block_max[i_block] = prev_block_max[largest_thread];
-        block_map[i_block] = largest_thread;
+        // max value is easy
+        block_max[i_out] = prev_block_max[largest_thread];
+
+        // the thread index must be an index in the original huge array
+        prev_block_map  += thread_index_offset;
+        largest_thread   = prev_block_map[largest_thread]; // mapping here
+        block_map[i_out] = largest_thread;
     }
 }
 
 int main()
 {
     constexpr size_t N = (256 + 128) * 1024 * 1024;
+    //constexpr size_t N = (32) * 1024 * 1024;
     auto n = N;
 
 
@@ -151,7 +160,7 @@ int main()
     checkCudaErrors(
       cudaMalloc(&d_block_max, N/BLOCK_SIZE * 2 * sizeof(*d_block_max))
     );
-    int *d_block_map = nullptr;
+    unsigned int *d_block_map = nullptr;
     checkCudaErrors(
       cudaMalloc(&d_block_map, N/BLOCK_SIZE * 2 * sizeof(*d_block_map))
     );
@@ -179,7 +188,7 @@ int main()
     constexpr int experiment_count = 100;
 
     // now this test code is the only thing that is really used
-    int *d_largest_thread = nullptr;
+    unsigned int *d_largest_thread = nullptr;
     float *d_largest = nullptr;
 
     checkCudaErrors(
@@ -226,23 +235,37 @@ int main()
 	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     }
 #endif
-    // TODO: I do think a while(n /= BLOCK_SIZE) loop would fit much better here
-    for (; n >= BLOCK_SIZE; n /= BLOCK_SIZE) {
-        // CUDA kernel with map
-        // something like this:
-        /* blocksArgmax<<< (n + BLOCK_SIZE - 1) / BLOCK_SIZE,
-	                    min(BLOCK_SIZE, n) >>>
-                       (d_block_max + block_map_selector,
-                        d_block_map + block_map_selector,
-                        d_block_max + N/BLOCK_SIZE - block_map_selector,
-                        d_block_map + N/BLOCK_SIZE - block_map_selector,
-                       )
-           block_map_selector = N/BLOCK_SIZE - block_map_selector;
-         */
-    }
-    // TODO: not needed with while loop (however, we have a separate first)
-    // last CUDA kernel with map
+#if 1
+    // TODO: In this setup, it only works if N is divisible by BLOCK_SIZE.
+    //       Now it is ok, but later this could be improved.
 
+    // first largest value per block finding step, also initializes index map
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+    blocksArgmaxFirst<<< numBlocks, numThreads >>>(
+		    /* input  */d_random_array,
+		    /* output */d_block_map, d_block_max
+		    );
+#if 1
+    // remaining steps with input and output index map with
+    // corresponding max values
+    while ((n /= BLOCK_SIZE) && n != 1) {
+        int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+        std::cout << n << " -> <<< " << numBlocks << ", "
+		  << numThreads << " >>>\n";
+	blocksArgmax<<< numBlocks, numThreads >>>(
+			/* input */
+                        d_block_map + block_map_selector,
+                        d_block_max + block_map_selector,
+                        /* output */
+                        d_block_map + N/BLOCK_SIZE - block_map_selector,
+			d_block_max + N/BLOCK_SIZE - block_map_selector
+                       );
+        block_map_selector = N/BLOCK_SIZE - block_map_selector;
+    }
+#endif
+#endif
 #if 1
     checkCudaErrors(cudaFree(d_largest));
     checkCudaErrors(cudaFree(d_largest_thread));
