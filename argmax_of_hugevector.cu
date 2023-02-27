@@ -1,6 +1,6 @@
 #include <iostream>
+#include <ctime>
 
-#include <inttypes.h>
 //#include <cuda_device_runtime_api.h>
 
 #include "check_cuda_errors.h"
@@ -148,7 +148,7 @@ int main()
     auto n = N;
 
 
-    MyRand myrand;
+    MyRand myrand(time(nullptr));
 
     float *h_random_array, *d_random_array = nullptr;
     // try to allocate GPU memory first, GPU memory is usually smaller
@@ -174,7 +174,8 @@ int main()
     std::cout << "Generating " << N << " long random array in CPU memory\n";
     for (auto i = 0; i < N; ++i) {
         // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed)
-        h_random_array[i] = static_cast<float>(myrand()) / static_cast<unsigned int>(-1);
+        h_random_array[i]  = static_cast<float>(myrand());
+        h_random_array[i] /= static_cast<float>(static_cast<unsigned int>(-1));
 	h_random_array[i] *= 1'000'000;
 	//std::cout << h_random_array[i] << "\n";
     }
@@ -294,6 +295,18 @@ int main()
     std::cout << "CPU found the overall largest value " << largest
               << " on index " << largest_index << "\n";
 
+    if (largest_index != h_largest_index) {
+       if (largest == h_largest) {
+           std::cout << "As the indices different, let's see all the "
+                     << "indices with this same max value:\n";
+	   for (unsigned int i = 0; i < N; ++i) {
+               if (h_random_array[i] == largest) { std::cout << i << " "; }
+	   }
+           std::cout << "\n";
+       } else {
+           std::cerr << "ERROR!!!\n";
+       }
+    }
 
 #endif
 #endif
