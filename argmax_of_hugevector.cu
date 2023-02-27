@@ -171,6 +171,7 @@ int main()
       cudaMallocHost(&h_random_array, N * sizeof(*h_random_array))
     );
 
+    std::cout << "Generating " << N << " long random array in CPU memory\n";
     for (auto i = 0; i < N; ++i) {
         // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed)
         h_random_array[i] = static_cast<float>(myrand()) / static_cast<unsigned int>(-1);
@@ -178,6 +179,7 @@ int main()
 	//std::cout << h_random_array[i] << "\n";
     }
 
+    std::cout << "Copying random array to GPU memory\n";
     // TODO: cut host array into pieces, do async memcopy chunks on other stream
     checkCudaErrors(
       cudaMemcpy(d_random_array, h_random_array, N * sizeof(*h_random_array),
@@ -185,7 +187,7 @@ int main()
     );
 
 #if 1
-    constexpr int experiment_count = 100;
+    constexpr int experiment_count = 4;
 
     // now this test code is the only thing that is really used
     unsigned int *d_largest_thread = nullptr;
@@ -201,10 +203,11 @@ int main()
     // it runs for testN values only, instead of N
     int testN = 256+128;
 
+    std::cout << "Doing some small tests with " << testN
+              << " values (1 thread block only)\n";
     for (int ex = 0; ex < experiment_count; ++ex)
     {
         int offset = myrand() % (N - testN - 1);
-
         threadBlockTest<<<1, testN>>>(d_random_array + offset, testN,
                                       d_largest_thread);
         int h_largest_thread = -1;
@@ -236,6 +239,8 @@ int main()
     }
 #endif
 #if 1
+    std::cout << "Now let's find the place of the largest value in our " << N
+              << " long array,\nfirst with GPU, then with CPU\n";
     // first largest value per block finding step, also initializes index map
     int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
@@ -249,8 +254,8 @@ int main()
     while ((n /= BLOCK_SIZE) && n != 1) {
         int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
-        std::cout << n << " -> <<< " << numBlocks << ", "
-		  << numThreads << " >>>\n";
+        //std::cout << n << " -> <<< " << numBlocks << ", "
+	//          << numThreads << " >>>\n";
 	blocksArgmax<<< numBlocks, numThreads >>>(
 			/* input */
                         d_block_map + block_map_selector,
