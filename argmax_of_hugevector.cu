@@ -297,7 +297,7 @@ int main()
 
     if (largest_index != h_largest_index) {
        if (largest == h_largest) {
-           std::cout << "As the indices different, let's see all the "
+           std::cout << "As the indices are different, let's see all "
                      << "indices with this same max value:\n";
 	   for (unsigned int i = 0; i < N; ++i) {
                if (h_random_array[i] == largest) { std::cout << i << " "; }
