@@ -236,9 +236,6 @@ int main()
     }
 #endif
 #if 1
-    // TODO: In this setup, it only works if N is divisible by BLOCK_SIZE.
-    //       Now it is ok, but later this could be improved.
-
     // first largest value per block finding step, also initializes index map
     int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
@@ -264,6 +261,35 @@ int main()
                        );
         block_map_selector = N/BLOCK_SIZE - block_map_selector;
     }
+
+    unsigned int h_largest_index = 0;
+    checkCudaErrors(
+      cudaMemcpy(&h_largest_index, d_block_map + block_map_selector,
+	           sizeof(h_largest_index), cudaMemcpyDeviceToHost)
+    );
+
+    float h_largest = 0;
+    checkCudaErrors(
+      cudaMemcpy(&h_largest, d_block_max + block_map_selector,
+	           sizeof(h_largest), cudaMemcpyDeviceToHost)
+    );
+
+    std::cout << "GPU found the overall largest value " << h_largest
+              << " on index " << h_largest_index << "\n";
+
+    float largest = 0;
+      int largest_index = 0;
+    for (unsigned int i = 0; i < N; ++i) {
+        if (h_random_array[i] > largest) {
+            largest = h_random_array[i];
+            largest_index = i;
+        }
+    }
+
+    std::cout << "CPU found the overall largest value " << largest
+              << " on index " << largest_index << "\n";
+
+
 #endif
 #endif
 #if 1
