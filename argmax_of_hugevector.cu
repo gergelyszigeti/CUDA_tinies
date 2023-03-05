@@ -141,6 +141,72 @@ void blocksArgmax(/* inputs, both are the size of N */
     }
 }
 
+// note: this is NOT a CUDA kernel, it is a simple function
+template<typename T>
+void arrayArgmax( /*input*/const T* __restrict values, int value_count,
+                 /*output*/int& max_index, T& max_value)
+{
+    int& n = value_count; // let me do this abbreviation
+    
+    // TODO: it's okay now, it is called only once
+    //       later, this malloc must be taken out
+    //       (I'm thinkig about a functor instead of this function)
+    float *d_block_max = nullptr;
+    checkCudaErrors(
+      // TODO: n/BLOCK_SIZE will be wrong if n is not divisible by BLOCK_SIZE
+      //       I think it should simply be numBlocks
+      cudaMalloc(&d_block_max, n/BLOCK_SIZE * 2 * sizeof(*d_block_max))
+    );
+    unsigned int *d_block_map = nullptr;
+    checkCudaErrors(
+      cudaMalloc(&d_block_map, n/BLOCK_SIZE * 2 * sizeof(*d_block_map))
+    );
+    size_t block_map_selector = 0;
+    
+    // first largest value per block finding step, also initializes index map
+    // it takes time, this is the only step that processes all the input values
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+    blocksArgmaxFirst<<< numBlocks, numThreads >>>(
+		    /* input  */d_random_array,
+		    /* output */d_block_map, d_block_max
+		    );
+
+    // remaining steps with input and output index map with corresponding max values
+    // note, it looks like a time consuming loop, in reality, this part is < 1ms,
+    // works on much less data than the first step
+    while ((n /= BLOCK_SIZE) && n != 1) {
+        int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+        //std::cout << n << " -> <<< " << numBlocks << ", "
+	//          << numThreads << " >>>\n";
+	blocksArgmax<<< numBlocks, numThreads >>>(
+			/* input */
+                        d_block_map + block_map_selector,
+                        d_block_max + block_map_selector,
+                        /* output */
+                        // TODO: n/BLOCK_SIZE can be wrong see TODO above
+                        d_block_map + n/BLOCK_SIZE - block_map_selector,
+			d_block_max + n/BLOCK_SIZE - block_map_selector
+                       );
+        // TODO: n/BLOCK_SIZE again
+        block_map_selector = n/BLOCK_SIZE - block_map_selector;
+    }
+
+    checkCudaErrors(
+      cudaMemcpy(&max_index, d_block_map + block_map_selector,
+	           sizeof(max_index), cudaMemcpyDeviceToHost)
+    );
+
+    checkCudaErrors(
+      cudaMemcpy(&max_value, d_block_max + block_map_selector,
+	           sizeof(max_value), cudaMemcpyDeviceToHost)
+    );
+    
+    checkCudaErrors(cudaFree(d_block_max));
+    checkCudaErrors(cudaFree(d_block_map));
+}
+
 int main()
 {
     constexpr size_t N = (256 + 128) * 1024 * 1024;
