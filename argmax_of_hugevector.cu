@@ -143,7 +143,7 @@ void blocksArgmax(/* inputs, both are the size of N */
 
 // note: this is NOT a CUDA kernel, it is a simple function
 template<typename T>
-void arrayArgmax( /*input*/const T* __restrict values, int value_count,
+void arrayArgmax( /*input*/const T* __restrict__ d_values, int value_count,
                  /*output*/int& max_index, T& max_value)
 {
     int& n = value_count; // let me do this abbreviation
@@ -168,7 +168,7 @@ void arrayArgmax( /*input*/const T* __restrict values, int value_count,
     int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
     int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
     blocksArgmaxFirst<<< numBlocks, numThreads >>>(
-		    /* input  */d_random_array,
+		    /* input  */d_values,
 		    /* output */d_block_map, d_block_max
 		    );
 
