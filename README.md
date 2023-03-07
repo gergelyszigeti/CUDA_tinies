@@ -9,6 +9,3 @@ difference that this new version can also handle less than 1024 values.
 However, the number of values should still be divisible by 32.
 
 **Update**: Now it is working with several millions of values also.
-
-**TODO**: put it into a separate function, which could also have the final GPU-CPU copy of the results. 
-
