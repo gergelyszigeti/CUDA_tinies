@@ -74,7 +74,7 @@ unsigned int largestOfBlock(const T* values, int value_count)
         // find the biggests of biggest numbers provided by each warp
         int largest_warp = largestOfWarp(largest_values);
         // winner thread (0-1023) is: biggest lane (0-31) in the biggest warp (0-31)
-	// if thread number is less than 1024, lane and warp numbers shrinks accordingly
+        // if thread number is less than 1024, lane and warp numbers shrinks accordingly
         winner_thread = largest_threads[largest_warp];
     }
     return winner_thread; /*** valid only if called from lane 0 ***/
@@ -83,7 +83,7 @@ unsigned int largestOfBlock(const T* values, int value_count)
 template<typename T>
 __global__
 void threadBlockTest(/*input*/  const T* __restrict__ values, int value_count,
-		     /*output*/ unsigned int* __restrict__ thread_id)
+                     /*output*/ unsigned int* __restrict__ thread_id)
 {
     *thread_id = largestOfBlock(values, value_count);
 }
@@ -105,7 +105,7 @@ void blocksArgmaxFirst(/*input*/       const T* __restrict__ values,
     if (threadIdx.x == 0) {
         block_max[i_out] = values[largest_thread];
         // in the first step, mapping to the original array is easy
-	block_map[i_out] = largest_thread + thread_index_offset;
+        block_map[i_out] = largest_thread + thread_index_offset;
     }
 }
 
@@ -143,69 +143,87 @@ void blocksArgmax(/* inputs, both are the size of N */
 
 // note: this is NOT a CUDA kernel, it is a simple function
 template<typename T>
-void arrayArgmaxGPU(
-         /*input*/const T* __restrict__ d_values, size_t value_count,
-        /*output*/unsigned int& max_index, T& max_value
-     )
-{
-    auto& n = value_count; // let me do this abbreviation
-    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
-
-    int mapSize = numBlocks; // we need a buffer for mapping, with this size
-    
-    // TODO: it's okay now, it is called only once
-    //       later, this malloc must be taken out
-    //       (I'm thinkig about a functor instead of this function)
-    float *d_block_max = nullptr;
-    checkCudaErrors(
-      cudaMalloc(&d_block_max, mapSize * 2 * sizeof(*d_block_max))
-    );
-    unsigned int *d_block_map = nullptr;
-    checkCudaErrors(
-      cudaMalloc(&d_block_map, mapSize * 2 * sizeof(*d_block_map))
-    );
-    size_t block_map_selector = 0;
-    
-    // first largest value per block finding step, also initializes index map
-    // it takes time, this is the only step that processes all the input values
-    blocksArgmaxFirst<<< numBlocks, numThreads >>>(
-		    /* input  */d_values,
-		    /* output */d_block_map, d_block_max
-		    );
-
-    // remaining steps with input and output index map with corresponding max values
-    // note, it looks like a time consuming loop, in reality, this part is < 1ms,
-    // works on much less data than the first step
-    while ((n /= BLOCK_SIZE) && n != 1) {
-        int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
-	int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
-        //std::cout << n << " -> <<< " << numBlocks << ", "
-	//          << numThreads << " >>>\n";
-	blocksArgmax<<< numBlocks, numThreads >>>(
-			/* input */
-                        d_block_map + block_map_selector,
-                        d_block_max + block_map_selector,
-                        /* output */
-                        d_block_map + mapSize - block_map_selector,
-                        d_block_max + mapSize - block_map_selector
-                       );
-        block_map_selector = mapSize - block_map_selector;
+class ArrayArgmaxGPU {
+public:
+    template<typename... PTs>
+    void operator()(PTs&&... params) {
+        arrayArgmaxGPU(std::forward<PTs>(params)...);
     }
 
-    checkCudaErrors(
-      cudaMemcpy(&max_index, d_block_map + block_map_selector,
-	           sizeof(max_index), cudaMemcpyDeviceToHost)
-    );
+    // we can free up the whole map memory for the next run
+    void resetMap() { mapSize = 0; }
 
-    checkCudaErrors(
-      cudaMemcpy(&max_value, d_block_max + block_map_selector,
-	           sizeof(max_value), cudaMemcpyDeviceToHost)
-    );
-    
-    checkCudaErrors(cudaFree(d_block_max));
-    checkCudaErrors(cudaFree(d_block_map));
-}
+    void arrayArgmaxGPU(
+             /*input*/const T* __restrict__ d_values, size_t value_count,
+            /*output*/unsigned int& max_index, T& max_value
+         )
+    {
+        auto& n = value_count; // let me do this abbreviation
+        int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+
+        if (mapSize < numBlocks) { // note: numBlocks is always > 0
+            // if our already allocated memory is not enough,
+            // let's allocate as much as need
+            checkCudaErrors(cudaFree(d_block_max));
+            checkCudaErrors(cudaFree(d_block_map));
+            mapSize = numBlocks;
+            checkCudaErrors(
+              cudaMalloc(&d_block_max, mapSize * 2 * sizeof(*d_block_max))
+            );
+            checkCudaErrors(
+              cudaMalloc(&d_block_map, mapSize * 2 * sizeof(*d_block_map))
+            );
+        }
+
+        size_t block_map_selector = 0;
+
+        // first largest value per block finding step,
+        // also initializes index map
+        // it takes time, this is the only step that processes
+        // all the input values
+        blocksArgmaxFirst<<< numBlocks, numThreads >>>(
+                        /* input  */d_values,
+                        /* output */d_block_map, d_block_max
+                        );
+
+        // remaining steps with input and output index map
+        // with corresponding max values
+        // note, it looks like a time consuming loop, in reality,
+        // this part is < 1ms,
+        // works on much less data than the first step
+        while ((n /= BLOCK_SIZE) && n != 1) {
+            int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            int numThreads = n > BLOCK_SIZE ? BLOCK_SIZE : n;
+            //std::cout << n << " -> <<< " << numBlocks << ", "
+            //          << numThreads << " >>>\n";
+            blocksArgmax<<< numBlocks, numThreads >>>(
+                            /* input */
+                            d_block_map + block_map_selector,
+                            d_block_max + block_map_selector,
+                            /* output */
+                            d_block_map + mapSize - block_map_selector,
+                            d_block_max + mapSize - block_map_selector
+                           );
+            block_map_selector = mapSize - block_map_selector;
+        }
+
+        checkCudaErrors(
+          cudaMemcpy(&max_index, d_block_map + block_map_selector,
+                       sizeof(max_index), cudaMemcpyDeviceToHost)
+        );
+
+        checkCudaErrors(
+          cudaMemcpy(&max_value, d_block_max + block_map_selector,
+                       sizeof(max_value), cudaMemcpyDeviceToHost)
+        );
+    }
+
+private:
+    int mapSize = 0; // we need a buffer for mapping, with this size
+    T *d_block_max = nullptr;
+    unsigned int *d_block_map = nullptr;
+};
 
 int main()
 {
@@ -213,6 +231,7 @@ int main()
     //constexpr size_t N = (32) * 1024 * 1024;
     auto n = N;
 
+    ArrayArgmaxGPU<float> arrayArgmaxGPU;
 
     MyRand myrand(time(nullptr));
 
@@ -232,15 +251,15 @@ int main()
         // TODO: if it is slow, use CUDA kernel (note: then deviceToHost copy needed)
         h_random_array[i]  = myrand();
         h_random_array[i] /= static_cast<unsigned int>(-1);
-	h_random_array[i] *= 1'000'000;
-	//std::cout << h_random_array[i] << "\n";
+        h_random_array[i] *= 1'000'000;
+        //std::cout << h_random_array[i] << "\n";
     }
 
     std::cout << "Copying random array to GPU memory\n";
     // TODO: cut host array into pieces, do async memcopy chunks on other stream
     checkCudaErrors(
       cudaMemcpy(d_random_array, h_random_array, N * sizeof(*h_random_array),
-	         cudaMemcpyHostToDevice)
+                 cudaMemcpyHostToDevice)
     );
 
 #if 1
@@ -291,8 +310,8 @@ int main()
                   << ", its value is " << largest << "\n";
         std::cout << (largest_index == h_largest_thread? "CHECKED.\n" : "ERROR!\n");
         std::cout << (largest_index == h_largest_thread?
-	            "---------------------------------------------------------------\n"
-	          : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+                    "---------------------------------------------------------------\n"
+                  : "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
     }
 #endif
 #if 1
@@ -324,9 +343,9 @@ int main()
        if (largest == max_value) {
            std::cout << "As the indices are different, let's see all "
                      << "indices with this same max value:\n";
-	   for (unsigned int i = 0; i < N; ++i) {
+           for (unsigned int i = 0; i < N; ++i) {
                if (h_random_array[i] == largest) { std::cout << i << " "; }
-	   }
+           }
            std::cout << "\n";
        } else {
            std::cerr << "ERROR!!!\n";
